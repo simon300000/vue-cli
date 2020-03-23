@@ -7,6 +7,7 @@ const PluginAPI = require('./PluginAPI')
 const dotenv = require('dotenv')
 const dotenvExpand = require('dotenv-expand')
 const defaultsDeep = require('lodash.defaultsdeep')
+const deasync = require('deasync')
 const { chalk, warn, error, isPlugin, resolvePluginId, loadModule, resolvePkg } = require('@vue/cli-shared-utils')
 
 const { defaults, validate } = require('./options')
@@ -307,7 +308,7 @@ module.exports = class Service {
     )
     if (fs.existsSync(configPath)) {
       try {
-        fileConfig = require(configPath)
+        fileConfig = importConfig(configPath)
 
         if (typeof fileConfig === 'function') {
           fileConfig = fileConfig()
@@ -414,4 +415,27 @@ function cloneRuleNames (to, from) {
       cloneRuleNames(to[i].oneOf, r.oneOf)
     }
   })
+}
+
+function importConfig (configPath) {
+  let done = false
+  let data
+  let reject = false
+  import(configPath)
+    .then(result => {
+      data = result
+      done = true
+    })
+    .catch(reason => {
+      data = reason
+      done = true
+      reject = true
+    })
+  deasync.loopWhile(() => {
+    return !done
+  })
+  if (reject) {
+    throw new Error(data)
+  }
+  return data.default
 }
