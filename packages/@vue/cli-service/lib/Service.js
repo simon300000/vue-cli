@@ -6,13 +6,15 @@ const PluginAPI = require('./PluginAPI')
 const dotenv = require('dotenv')
 const dotenvExpand = require('dotenv-expand')
 const defaultsDeep = require('lodash.defaultsdeep')
-const deasync = require('deasync')
 const { chalk, warn, error, isPlugin, resolvePluginId, loadModule, resolvePkg } = require('@vue/cli-shared-utils')
 
 const { defaults, validate } = require('./options')
 
-const loadConfig = configPath => {
-  let fileConfig = require(configPath)
+const loadConfig = (configPath, esm) => {
+  if (esm) {
+    warn(`ECMAScript modules is enabled, config will be loaded with ${chalk.bold('import()')}`)
+  }
+  let fileConfig = esm ? importConfig(configPath) : require(configPath)
 
   if (typeof fileConfig === 'function') {
     fileConfig = fileConfig()
@@ -316,40 +318,20 @@ module.exports = class Service {
 
   loadUserOptions () {
     // vue.config.js
-    // vue.config.cjs
     let fileConfig, pkgConfig, resolved, resolvedFrom
     const esm = this.pkg.type && this.pkg.type === 'module'
     const jsConfigPath = path.resolve(this.context, 'vue.config.js')
-    const cjsConfigPath = path.resolve(this.context, 'vue.config.cjs')
     const configPath = (
       process.env.VUE_CLI_SERVICE_CONFIG_PATH ||
       jsConfigPath
     )
 
     try {
-      fileConfig = loadConfig(configPath)
+      fileConfig = loadConfig(configPath, esm)
     } catch (e) {
-      if (e.code !== 'MODULE_NOT_FOUND') {
-        if (e.code === 'ERR_REQUIRE_ESM') {
-          warn(`Rename ${chalk.bold('vue.config.js')} to ${chalk.bold('vue.config.cjs')} when ECMAScript modules is enabled`)
-        }
+      if (e.code !== 'MODULE_NOT_FOUND' && e.code !== 'ERR_MODULE_NOT_FOUND') {
         error(`Error loading ${chalk.bold('vue.config.js')}:`)
         throw e
-      }
-    }
-
-    // vue.config.js not found, esm enabled, no env set
-    if (!fileConfig && esm && !process.env.VUE_CLI_SERVICE_CONFIG_PATH) {
-      try {
-        fileConfig = loadConfig(cjsConfigPath)
-      } catch (e) {
-        if (e.code !== 'MODULE_NOT_FOUND') {
-          error(`Error loading ${chalk.bold('vue.config.cjs')}:`)
-          throw e
-        }
-      }
-      if (fileConfig) {
-        warn(`ECMAScript modules is detected, config loaded from ${chalk.bold('vue.config.cjs')}`)
       }
     }
 
@@ -445,12 +427,13 @@ function cloneRuleNames (to, from) {
 }
 
 function importConfig (configPath) {
+  const deasync = require('deasync')
   let done = false
   let data
   let reject = false
   import(configPath)
     .then(result => {
-      data = result
+      data = result && result.default
       done = true
     })
     .catch(reason => {
@@ -462,7 +445,11 @@ function importConfig (configPath) {
     return !done
   })
   if (reject) {
-    throw new Error(data)
+    if (data instanceof Error) {
+      throw data
+    } else {
+      throw data
+    }
   }
-  return data.default
+  return data
 }
